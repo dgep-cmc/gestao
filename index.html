@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Portal de Gerenciamento de Frequências e Contratações</title>
+    <script type="module" crossorigin src="./assets/index-Q8Wo5iYv.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-CSwoClvR.css">
+  </head>
+  <body>
+    <div id="root"></div>
+    <div id="global-error" style="display:none; padding: 20px; font-family: sans-serif; color: #721c24; background: #f8d7da; min-height: 100vh; z-index: 99999; position: absolute; top: 0; left: 0; right: 0;">
+      <h2>Erro Crítico de Carregamento</h2>
+      <p>Detalhes do erro:</p>
+      <pre id="global-error-details" style="background: rgba(0,0,0,0.1); padding: 10px; border-radius: 4px; white-space: pre-wrap; word-break: break-word;"></pre>
+    </div>
+    <script>
+      window.addEventListener('error', function(event) {
+        // Ignorar erros que não sejam de script (ex: iframes, event.target pode ser script)
+        var msg = event.message || '';
+        if (!msg && event.target && event.target.tagName === 'SCRIPT') {
+          msg = 'Falha ao carregar script: ' + event.target.src;
+        }
+        document.getElementById('root').style.display = 'none';
+        document.getElementById('global-error').style.display = 'block';
+        document.getElementById('global-error-details').innerText = 'Mensagem: ' + msg + '\n' + (event.error && event.error.stack ? event.error.stack : '');
+      }, true);
+      window.addEventListener('unhandledrejection', function(event) {
+        document.getElementById('root').style.display = 'none';
+        document.getElementById('global-error').style.display = 'block';
+        document.getElementById('global-error-details').innerText = 'Uncaught Promise Rejection: ' + (event.reason ? (event.reason.stack || event.reason) : 'Unknown reason');
+      });
+    </script>
+  </body>
+</html>
+
