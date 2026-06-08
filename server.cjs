@@ -252,54 +252,6 @@ async function getOrCreateFolder(token, name, parentId) {
     delete serverPendingFolderPromises[cacheKey];
   }
 }
-async function findFolderBySubstring(token, substring, parentId) {
-  try {
-    const query = `mimeType = 'application/vnd.google-apps.folder' and trashed = false and '${parentId}' in parents`;
-    const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true`;
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (!res.ok) {
-      console.error("Error finding folder by substring on Drive:", await res.text());
-      return null;
-    }
-    const data = await res.json();
-    if (data.files && data.files.length > 0) {
-      const targetSubNormalized = substring.normalize("NFC").trim().toUpperCase();
-      for (const file of data.files) {
-        const fileNormalized = file.name.normalize("NFC").trim().toUpperCase();
-        if (fileNormalized.includes(targetSubNormalized)) {
-          return { id: file.id, name: file.name };
-        }
-      }
-    }
-    return null;
-  } catch (err) {
-    console.error("findFolderBySubstring exception:", err);
-    return null;
-  }
-}
-async function renameFileOrFolder(token, fileId, newName) {
-  try {
-    const url = `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`;
-    const res = await fetch(url, {
-      method: "PATCH",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ name: newName })
-    });
-    if (!res.ok) {
-      console.error("Google Drive rename failed:", await res.text());
-      return false;
-    }
-    return true;
-  } catch (err) {
-    console.error("renameFileOrFolder exception:", err);
-    return false;
-  }
-}
 async function uploadFile(token, fileBuffer, name, fileType, parentFolderId) {
   try {
     const boundary = "custom_boundary_drive_upload";
@@ -349,15 +301,16 @@ ${JSON.stringify(metadata)}\r
 }
 async function resolveTargetFolder(token, context) {
   const rootId = WORKSPACE_ROOT_FOLDER_ID;
+  const sgestaoId = await getOrCreateFolder(token, "Sistema de Gest\xE3o de Pessoas", rootId);
   if (context.module === "frequency") {
-    const estagiariosId = await getOrCreateFolder(token, "Estagi\xE1rios", rootId);
+    const estagiariosId = await getOrCreateFolder(token, "Estagi\xE1rios", sgestaoId);
     const freqId = await getOrCreateFolder(token, "Frequ\xEAncias", estagiariosId);
     const monthYear = (context.monthYear || (/* @__PURE__ */ new Date()).toISOString().substring(0, 7)).trim();
     const monthYearId = await getOrCreateFolder(token, monthYear, freqId);
     const lotacao = (context.lotacao || "N\xE3o Categorizado").trim();
     return await getOrCreateFolder(token, lotacao, monthYearId);
   } else if (context.module === "frequency_comissionados") {
-    const comissionadosId = await getOrCreateFolder(token, "Comissionados", rootId);
+    const comissionadosId = await getOrCreateFolder(token, "Comissionados", sgestaoId);
     const freqId = await getOrCreateFolder(token, "Frequ\xEAncias", comissionadosId);
     const monthYear = (context.monthYear || (/* @__PURE__ */ new Date()).toISOString().substring(0, 7)).trim();
     const monthYearId = await getOrCreateFolder(token, monthYear, freqId);
@@ -366,34 +319,51 @@ async function resolveTargetFolder(token, context) {
       return await getOrCreateFolder(token, "GABINETE DA PRESID\xCANCIA", monthYearId);
     }
     let gestorName = (context.userName || context.lotacao || "N\xE3o Categorizado").trim().toUpperCase();
-    if (gestorName.startsWith("VER. ")) {
-      gestorName = gestorName.replace("VER. ", "VER ");
-    }
-    if (gestorName.startsWith("VEREADOR ")) {
-      gestorName = gestorName.replace("VEREADOR ", "VER ");
-    }
-    if (gestorName && !gestorName.startsWith("VER ")) {
-      gestorName = "VER " + gestorName;
-    }
+    gestorName = gestorName.replace(/^(VER\.|VER|VEREADOR\.|VEREADOR)\s+/, "");
+    gestorName = `VER. ${gestorName}`;
     return await getOrCreateFolder(token, gestorName, monthYearId);
   } else {
-    const estagiariosId = await getOrCreateFolder(token, "Estagi\xE1rios", rootId);
-    const hiringId = await getOrCreateFolder(token, "Contrata\xE7\xF5es", estagiariosId);
-    const lotacao = context.lotacao || "N\xE3o Categorizado";
-    const lotacaoId = await getOrCreateFolder(token, lotacao, hiringId);
-    const reqName = context.requestNameAndId || "Requerimento";
-    const rId = context.requestId || (context.requestNameAndId ? context.requestNameAndId.split("_").pop() : null);
-    if (rId && rId.length > 3) {
-      const existingFolder = await findFolderBySubstring(token, rId, lotacaoId);
-      if (existingFolder) {
-        if (existingFolder.name !== reqName) {
-          console.log(`Renaming Google Drive folder from "${existingFolder.name}" to "${reqName}"`);
-          await renameFileOrFolder(token, existingFolder.id, reqName);
-        }
-        return existingFolder.id;
+    const isComissionado = context.category === "comissionado";
+    if (isComissionado) {
+      const comissionadosId = await getOrCreateFolder(token, "Comissionados", sgestaoId);
+      const hiringId = await getOrCreateFolder(token, "Contrata\xE7\xF5es", comissionadosId);
+      let vereadorName = (context.userName || context.lotacao || "N\xE3o Categorizado").trim();
+      const vereadorNameUpper = vereadorName.toUpperCase();
+      if (vereadorNameUpper === "GABINETE DA PRESID\xCANCIA" || vereadorNameUpper === "PRESID\xCANCIA") {
+        vereadorName = "Gabinete da Presid\xEAncia";
+      } else {
+        vereadorName = vereadorName.replace(/^(VER\.|VER|VEREADOR\.|VEREADOR)\s+/i, "");
+        vereadorName = `Ver. ${vereadorName}`;
       }
+      const vereadorId = await getOrCreateFolder(token, vereadorName, hiringId);
+      let servidorName = "N\xE3o Categorizado";
+      if (context.requestNameAndId) {
+        const parts = context.requestNameAndId.split("_");
+        if (parts.length > 1) {
+          parts.pop();
+          servidorName = parts.join(" ");
+        } else {
+          servidorName = context.requestNameAndId;
+        }
+      }
+      return await getOrCreateFolder(token, servidorName, vereadorId);
+    } else {
+      const estagiariosId = await getOrCreateFolder(token, "Estagi\xE1rios", sgestaoId);
+      const hiringId = await getOrCreateFolder(token, "Contrata\xE7\xF5es", estagiariosId);
+      const lotacao = context.lotacao || "N\xE3o Categorizado";
+      const lotacaoId = await getOrCreateFolder(token, lotacao, hiringId);
+      let estagiarioName = "N\xE3o Categorizado";
+      if (context.requestNameAndId) {
+        const parts = context.requestNameAndId.split("_");
+        if (parts.length > 1) {
+          parts.pop();
+          estagiarioName = parts.join(" ");
+        } else {
+          estagiarioName = context.requestNameAndId;
+        }
+      }
+      return await getOrCreateFolder(token, estagiarioName, lotacaoId);
     }
-    return await getOrCreateFolder(token, reqName, lotacaoId);
   }
 }
 function extractDriveFileId(url) {
