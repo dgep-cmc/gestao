@@ -303,6 +303,7 @@ async function resolveTargetFolder(token, context, fileName) {
   const rootId = WORKSPACE_ROOT_FOLDER_ID;
   const sgestaoId = await getOrCreateFolder(token, "Sistema de Gest\xE3o de Pessoas", rootId);
   const isComissionado = context.module === "frequency_comissionados" || context.module === "hiring_comissionados" || context.category === "comissionado";
+  console.log(`[resolveTargetFolder] Uploading "${fileName || "unnamed"}" | module: "${context.module}" | category: "${context.category}" | isComissionado: ${isComissionado}`);
   if (context.module === "frequency" || context.module === "frequency_comissionados") {
     if (isComissionado) {
       const comissionadosId = await getOrCreateFolder(token, "Comissionados", sgestaoId);
