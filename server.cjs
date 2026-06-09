@@ -302,29 +302,30 @@ ${JSON.stringify(metadata)}\r
 async function resolveTargetFolder(token, context, fileName) {
   const rootId = WORKSPACE_ROOT_FOLDER_ID;
   const sgestaoId = await getOrCreateFolder(token, "Sistema de Gest\xE3o de Pessoas", rootId);
-  if (context.module === "frequency") {
-    const estagiariosId = await getOrCreateFolder(token, "Estagi\xE1rios", sgestaoId);
-    const freqId = await getOrCreateFolder(token, "Frequ\xEAncias", estagiariosId);
-    const monthYear = (context.monthYear || (/* @__PURE__ */ new Date()).toISOString().substring(0, 7)).trim();
-    const monthYearId = await getOrCreateFolder(token, monthYear, freqId);
-    const lotacao = (context.lotacao || "N\xE3o Categorizado").trim();
-    return await getOrCreateFolder(token, lotacao, monthYearId);
-  } else if (context.module === "frequency_comissionados") {
-    const comissionadosId = await getOrCreateFolder(token, "Comissionados", sgestaoId);
-    const freqId = await getOrCreateFolder(token, "Frequ\xEAncias", comissionadosId);
-    const monthYear = (context.monthYear || (/* @__PURE__ */ new Date()).toISOString().substring(0, 7)).trim();
-    const monthYearId = await getOrCreateFolder(token, monthYear, freqId);
-    const lotacaoUpper = (context.lotacao || "").trim().toUpperCase();
-    if (lotacaoUpper === "GABINETE DA PRESID\xCANCIA") {
-      return await getOrCreateFolder(token, "GABINETE DA PRESID\xCANCIA", monthYearId);
+  const isComissionado = context.module === "frequency_comissionados" || context.category === "comissionado";
+  if (context.module === "frequency" || context.module === "frequency_comissionados") {
+    if (isComissionado) {
+      const comissionadosId = await getOrCreateFolder(token, "Comissionados", sgestaoId);
+      const freqId = await getOrCreateFolder(token, "Frequ\xEAncias", comissionadosId);
+      const monthYear = (context.monthYear || (/* @__PURE__ */ new Date()).toISOString().substring(0, 7)).trim();
+      const monthYearId = await getOrCreateFolder(token, monthYear, freqId);
+      const lotacaoUpper = (context.lotacao || "").trim().toUpperCase();
+      if (lotacaoUpper === "GABINETE DA PRESID\xCANCIA") {
+        return await getOrCreateFolder(token, "GABINETE DA PRESID\xCANCIA", monthYearId);
+      }
+      let gestorName = (context.userName || context.lotacao || "N\xE3o Categorizado").trim().toUpperCase();
+      gestorName = gestorName.replace(/^(VER\.|VER|VEREADOR\.|VEREADOR)\s+/, "");
+      gestorName = `VER. ${gestorName}`;
+      return await getOrCreateFolder(token, gestorName, monthYearId);
+    } else {
+      const estagiariosId = await getOrCreateFolder(token, "Estagi\xE1rios", sgestaoId);
+      const freqId = await getOrCreateFolder(token, "Frequ\xEAncias", estagiariosId);
+      const monthYear = (context.monthYear || (/* @__PURE__ */ new Date()).toISOString().substring(0, 7)).trim();
+      const monthYearId = await getOrCreateFolder(token, monthYear, freqId);
+      const lotacao = (context.lotacao || "N\xE3o Categorizado").trim();
+      return await getOrCreateFolder(token, lotacao, monthYearId);
     }
-    let gestorName = (context.userName || context.lotacao || "N\xE3o Categorizado").trim().toUpperCase();
-    gestorName = gestorName.replace(/^(VER\.|VER|VEREADOR\.|VEREADOR)\s+/, "");
-    gestorName = `VER. ${gestorName}`;
-    return await getOrCreateFolder(token, gestorName, monthYearId);
   } else {
-    const fName = (fileName || "").normalize("NFC").toUpperCase();
-    const isComissionado = context.category === "comissionado" || !!context.userName || fName.startsWith("FORMUL\xC1RIO_") || fName.startsWith("FORMULARIO_") || fName.includes("DECLARA\xC7\xC3O_CAIXA") || fName.includes("DECLARACAO_CAIXA") || fName.includes("DECLARACAO_CEF") || fName.includes("EXONERA\xC7\xC3O") || fName.includes("EXONERACAO") || fName.includes("INDICA\xC7\xC3O") || fName.includes("INDICACAO") || (context.lotacao || "").toUpperCase().includes("VEREADOR") || (context.lotacao || "").toUpperCase().includes("GABINETE");
     if (isComissionado) {
       const comissionadosId = await getOrCreateFolder(token, "Comissionados", sgestaoId);
       const hiringId = await getOrCreateFolder(token, "Contrata\xE7\xF5es", comissionadosId);
