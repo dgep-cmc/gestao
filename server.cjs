@@ -302,7 +302,7 @@ ${JSON.stringify(metadata)}\r
 async function resolveTargetFolder(token, context, fileName) {
   const rootId = WORKSPACE_ROOT_FOLDER_ID;
   const sgestaoId = await getOrCreateFolder(token, "Sistema de Gest\xE3o de Pessoas", rootId);
-  const isComissionado = context.module === "frequency_comissionados" || context.category === "comissionado";
+  const isComissionado = context.module === "frequency_comissionados" || context.module === "hiring_comissionados" || context.category === "comissionado";
   if (context.module === "frequency" || context.module === "frequency_comissionados") {
     if (isComissionado) {
       const comissionadosId = await getOrCreateFolder(token, "Comissionados", sgestaoId);
