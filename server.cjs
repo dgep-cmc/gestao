@@ -299,7 +299,7 @@ ${JSON.stringify(metadata)}\r
     throw err;
   }
 }
-async function resolveTargetFolder(token, context) {
+async function resolveTargetFolder(token, context, fileName) {
   const rootId = WORKSPACE_ROOT_FOLDER_ID;
   const sgestaoId = await getOrCreateFolder(token, "Sistema de Gest\xE3o de Pessoas", rootId);
   if (context.module === "frequency") {
@@ -323,7 +323,8 @@ async function resolveTargetFolder(token, context) {
     gestorName = `VER. ${gestorName}`;
     return await getOrCreateFolder(token, gestorName, monthYearId);
   } else {
-    const isComissionado = context.category === "comissionado";
+    const fName = (fileName || "").normalize("NFC").toUpperCase();
+    const isComissionado = context.category === "comissionado" || !!context.userName || fName.startsWith("FORMUL\xC1RIO_") || fName.startsWith("FORMULARIO_") || fName.includes("DECLARA\xC7\xC3O_CAIXA") || fName.includes("DECLARACAO_CAIXA") || fName.includes("DECLARACAO_CEF") || fName.includes("EXONERA\xC7\xC3O") || fName.includes("EXONERACAO") || fName.includes("INDICA\xC7\xC3O") || fName.includes("INDICACAO") || (context.lotacao || "").toUpperCase().includes("VEREADOR") || (context.lotacao || "").toUpperCase().includes("GABINETE");
     if (isComissionado) {
       const comissionadosId = await getOrCreateFolder(token, "Comissionados", sgestaoId);
       const hiringId = await getOrCreateFolder(token, "Contrata\xE7\xF5es", comissionadosId);
@@ -501,7 +502,7 @@ async function startServer() {
       }
       const fileBuffer = Buffer.from(fileBase64, "base64");
       const token = await getServiceAccountAccessToken();
-      const folderId = await resolveTargetFolder(token, context);
+      const folderId = await resolveTargetFolder(token, context, fileName);
       const result = await uploadFile(token, fileBuffer, fileName, fileType, folderId);
       return res.json(result);
     } catch (error) {
