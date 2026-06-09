@@ -24,11 +24,11 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 // server.ts
 var import_express = __toESM(require("express"), 1);
 var import_path = __toESM(require("path"), 1);
-var import_vite = require("vite");
 var import_dotenv = __toESM(require("dotenv"), 1);
 var import_crypto = __toESM(require("crypto"), 1);
 var import_http = __toESM(require("http"), 1);
 var import_cors = __toESM(require("cors"), 1);
+var import_fs = __toESM(require("fs"), 1);
 import_dotenv.default.config();
 var serverFolderIdCache = {};
 var serverPendingFolderPromises = {};
@@ -683,7 +683,8 @@ async function startServer() {
     }
   });
   if (process.env.NODE_ENV !== "production") {
-    const vite = await (0, import_vite.createServer)({
+    const { createServer: createViteServer } = await import("vite");
+    const vite = await createViteServer({
       server: {
         middlewareMode: true,
         hmr: { server: httpServer }
@@ -692,7 +693,7 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = import_path.default.join(process.cwd(), "dist");
+    const distPath = import_fs.default.existsSync(import_path.default.join(process.cwd(), "dist")) ? import_path.default.join(process.cwd(), "dist") : process.cwd();
     app.use(import_express.default.static(distPath));
     app.get("*all", (req, res) => {
       res.sendFile(import_path.default.join(distPath, "index.html"));
