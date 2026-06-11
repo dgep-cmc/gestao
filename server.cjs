@@ -302,6 +302,16 @@ ${JSON.stringify(metadata)}\r
 async function resolveTargetFolder(token, context, fileName) {
   const rootId = WORKSPACE_ROOT_FOLDER_ID;
   const sgestaoId = await getOrCreateFolder(token, "Sistema de Gest\xE3o de Pessoas", rootId);
+  if (context.module === "cabinet_composition") {
+    const comissionadosId = await getOrCreateFolder(token, "Comissionados", sgestaoId);
+    const composicaoId = await getOrCreateFolder(token, "Composi\xE7\xE3o do Gabinete", comissionadosId);
+    const yearMonth = (context.yearMonth || (/* @__PURE__ */ new Date()).toISOString().substring(0, 7).replace("-", "_")).trim();
+    const yearMonthId = await getOrCreateFolder(token, yearMonth, composicaoId);
+    let vereadorName = (context.userName || "Vereador").trim();
+    vereadorName = vereadorName.replace(/^(VER\.|VER|VEREADOR\.|VEREADOR)\s+/i, "");
+    vereadorName = `Ver. ${vereadorName}`;
+    return await getOrCreateFolder(token, vereadorName, yearMonthId);
+  }
   const isComissionado = context.module === "frequency_comissionados" || context.module === "hiring_comissionados" || context.category === "comissionado";
   console.log(`[resolveTargetFolder] Uploading "${fileName || "unnamed"}" | module: "${context.module}" | category: "${context.category}" | isComissionado: ${isComissionado}`);
   if (context.module === "frequency" || context.module === "frequency_comissionados") {
