@@ -126,17 +126,21 @@ function signJwtRS256(payload, privateKeyPem, clientEmail) {
     const signature = sign.sign(formattedKey);
     return `${signingInput}.${base64UrlEncode(signature)}`;
   } catch (err) {
-    console.error("--- PRIVATE KEY SIGNING DIAGNOSTICS ---");
-    console.error("Error message:", err.message);
-    console.error("Raw key input length:", privateKeyPem ? privateKeyPem.length : 0);
-    console.error("Raw key input starts with:", privateKeyPem ? privateKeyPem.substring(0, 40) : "N/A");
-    console.error("Raw key input ends with:", privateKeyPem ? privateKeyPem.substring(Math.max(0, privateKeyPem.length - 40)) : "N/A");
-    console.error("Formatted key length:", formattedKey ? formattedKey.length : 0);
-    console.error("Formatted key starts with:", formattedKey ? formattedKey.substring(0, 45) : "N/A");
-    console.error("Formatted key ends with:", formattedKey ? formattedKey.substring(Math.max(0, formattedKey.length - 45)) : "N/A");
-    console.error("Does formatted key contain newlines:", formattedKey ? formattedKey.includes("\n") : false);
-    console.error("--------------------------------------");
-    throw new Error(`Falha ao assinar JWT com a chave privada fornecida: ${err.message}. Verifique os logs para detalhes de diagn\xF3stico.`);
+    if (process.env.NODE_ENV !== "production") {
+      console.error("--- PRIVATE KEY SIGNING DIAGNOSTICS ---");
+      console.error("Error message:", err.message);
+      console.error("Raw key input length:", privateKeyPem ? privateKeyPem.length : 0);
+      console.error("Raw key input starts with:", privateKeyPem ? privateKeyPem.substring(0, 40) : "N/A");
+      console.error("Raw key input ends with:", privateKeyPem ? privateKeyPem.substring(Math.max(0, privateKeyPem.length - 40)) : "N/A");
+      console.error("Formatted key length:", formattedKey ? formattedKey.length : 0);
+      console.error("Formatted key starts with:", formattedKey ? formattedKey.substring(0, 45) : "N/A");
+      console.error("Formatted key ends with:", formattedKey ? formattedKey.substring(Math.max(0, formattedKey.length - 45)) : "N/A");
+      console.error("Does formatted key contain newlines:", formattedKey ? formattedKey.includes("\n") : false);
+      console.error("--------------------------------------");
+    } else {
+      console.error("Erro ao assinar JWT com a chave privada fornecida em produ\xE7\xE3o.");
+    }
+    throw new Error(`Falha ao assinar JWT com a chave privada fornecida.`);
   }
 }
 async function getServiceAccountAccessToken() {
@@ -523,12 +527,50 @@ async function getUniqueFileName(token, folderId, baseName) {
     return baseName;
   }
 }
+var rateLimitWindowMs = 15 * 60 * 1e3;
+var maxRequestsPerWindow = 100;
+var ipRequestCounts = {};
+function rateLimiter(req, res, next) {
+  const ip = req.ip || req.socket.remoteAddress || "unknown";
+  const now = Date.now();
+  if (!ipRequestCounts[ip] || ipRequestCounts[ip].resetTime < now) {
+    ipRequestCounts[ip] = {
+      count: 1,
+      resetTime: now + rateLimitWindowMs
+    };
+    return next();
+  }
+  ipRequestCounts[ip].count += 1;
+  if (ipRequestCounts[ip].count > maxRequestsPerWindow) {
+    return res.status(429).json({
+      error: "Muitas requisi\xE7\xF5es origin\xE1rias deste IP. Por favor, tente novamente mais tarde."
+    });
+  }
+  next();
+}
 async function startServer() {
   const app = (0, import_express.default)();
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3e3;
   const httpServer = import_http.default.createServer(app);
   app.use(import_express.default.json({ limit: "50mb" }));
-  app.use((0, import_cors.default)());
+  app.use("/api/", rateLimiter);
+  const allowedOrigins = [
+    "https://gestao-pessoas.onrender.com",
+    "https://dgep-cmc.github.io",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173"
+  ];
+  app.use((0, import_cors.default)({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.indexOf(origin) !== -1) {
+        return callback(null, true);
+      }
+      return callback(new Error("CORS origin not allowed by security policy"), false);
+    }
+  }));
   app.get("/api/ping", (req, res) => {
     res.json({
       status: "ok",
@@ -584,7 +626,13 @@ async function startServer() {
       return res.status(500).send(error.message || "Erro interno ao baixar arquivo do Google Drive.");
     }
   });
-  app.get("/api/drive/diagnostics", async (req, res) => {
+  app.get("/api/drive/diagnostics", (req, res, next) => {
+    const isLocal = req.hostname === "localhost" || req.hostname === "127.0.0.1";
+    if (process.env.NODE_ENV === "production" && !isLocal) {
+      return res.status(403).send("Acesso restrito ao ambiente de desenvolvimento.");
+    }
+    next();
+  }, async (req, res) => {
     try {
       const privateKey = process.env.VITE_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || "";
       const email = process.env.VITE_GOOGLE_SERVICE_ACCOUNT_EMAIL || "";
