@@ -569,38 +569,40 @@ async function fetchGooglePublicKeys() {
 async function verifyFirebaseToken(token) {
   try {
     const parts = token.split(".");
-    if (parts.length !== 3) return null;
+    if (parts.length !== 3) {
+      console.warn("[Auth] Token does not have 3 parts");
+      return null;
+    }
     const [headerB64, payloadB64, signatureB64] = parts;
-    const header = JSON.parse(Buffer.from(headerB64, "base64").toString("utf8"));
-    const payload = JSON.parse(Buffer.from(payloadB64, "base64").toString("utf8"));
+    const header = JSON.parse(Buffer.from(headerB64, "base64url").toString("utf8"));
+    const payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf8"));
     const now = Math.floor(Date.now() / 1e3);
     if (payload.exp < now) {
-      console.warn("Token expired");
+      console.warn("[Auth] Token expired");
       return null;
     }
     const email = payload.email;
     if (!email || !email.endsWith("@cmc.pr.gov.br")) {
-      console.warn("Invalid email domain:", email);
+      console.warn("[Auth] Invalid email domain:", email);
       return null;
     }
     const keys = await fetchGooglePublicKeys();
     const cert = keys[header.kid];
     if (!cert) {
-      console.warn("Public key certificate not found for kid:", header.kid);
+      console.warn("[Auth] Public key certificate not found for kid:", header.kid);
       return null;
     }
     const verify = import_crypto.default.createVerify("RSA-SHA256");
     verify.update(`${headerB64}.${payloadB64}`);
-    const base64Signature = signatureB64.replace(/-/g, "+").replace(/_/g, "/");
-    const signatureBuf = Buffer.from(base64Signature, "base64");
+    const signatureBuf = Buffer.from(signatureB64, "base64url");
     const isValid = verify.verify(cert, signatureBuf);
     if (!isValid) {
-      console.warn("JWT signature verification failed");
+      console.warn("[Auth] JWT signature verification failed");
       return null;
     }
     return { email };
   } catch (err) {
-    console.error("Error verifying token:", err);
+    console.error("[Auth] Exception during token verification:", err);
     return null;
   }
 }
