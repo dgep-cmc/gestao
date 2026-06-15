@@ -606,6 +606,183 @@ async function verifyFirebaseToken(token) {
     return null;
   }
 }
+var TEMP_JWT_SECRET = process.env.VITE_FIREBASE_API_KEY || "fallback_secret_temp_jwt_dgep_cmc";
+function signTempJWT(payload, expiresInSeconds) {
+  const header = { alg: "HS256", typ: "JWT" };
+  const base64UrlEncode = (str) => {
+    const buf = Buffer.isBuffer(str) ? str : Buffer.from(str);
+    return buf.toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+  };
+  const encodedHeader = base64UrlEncode(JSON.stringify(header));
+  const fullPayload = {
+    ...payload,
+    exp: Math.floor(Date.now() / 1e3) + expiresInSeconds
+  };
+  const encodedPayload = base64UrlEncode(JSON.stringify(fullPayload));
+  const signingInput = `${encodedHeader}.${encodedPayload}`;
+  const secret = TEMP_JWT_SECRET;
+  const signature = import_crypto.default.createHmac("sha256", secret).update(signingInput).digest();
+  return `${signingInput}.${base64UrlEncode(signature)}`;
+}
+function verifyTempJWT(token) {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const [headerB64, payloadB64, signatureB64] = parts;
+    const signingInput = `${headerB64}.${payloadB64}`;
+    const secret = TEMP_JWT_SECRET;
+    const calculatedSignature = import_crypto.default.createHmac("sha256", secret).update(signingInput).digest("base64url");
+    if (calculatedSignature !== signatureB64) {
+      return null;
+    }
+    const payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf8"));
+    if (payload.exp < Math.floor(Date.now() / 1e3)) {
+      return null;
+    }
+    return payload;
+  } catch (err) {
+    return null;
+  }
+}
+async function getFirestoreDocument(collectionName, docId) {
+  const token = await getServiceAccountAccessToken();
+  const projectId = process.env.VITE_FIREBASE_PROJECT_ID || "gen-lang-client-0223592723";
+  const databaseId = process.env.VITE_FIREBASE_DATABASE_ID || "ai-studio-8d16fa40-122b-4ae3-bc92-82dd487f555c";
+  const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/${collectionName}/${docId}`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!res.ok) {
+    if (res.status === 404) return null;
+    throw new Error(`Firestore REST GET failed: ${await res.text()}`);
+  }
+  return await res.json();
+}
+async function updateFirestoreOTP(collectionName, docId, hash, expires) {
+  const token = await getServiceAccountAccessToken();
+  const projectId = process.env.VITE_FIREBASE_PROJECT_ID || "gen-lang-client-0223592723";
+  const databaseId = process.env.VITE_FIREBASE_DATABASE_ID || "ai-studio-8d16fa40-122b-4ae3-bc92-82dd487f555c";
+  const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/${collectionName}/${docId}?updateMask.fieldPaths=otpHash&updateMask.fieldPaths=otpExpires&updateMask.fieldPaths=otpAttempts`;
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      fields: {
+        otpHash: { stringValue: hash },
+        otpExpires: { stringValue: expires },
+        otpAttempts: { integerValue: "0" }
+      }
+    })
+  });
+  return res.ok;
+}
+async function incrementOTPAttempts(collectionName, docId, currentAttempts) {
+  const token = await getServiceAccountAccessToken();
+  const projectId = process.env.VITE_FIREBASE_PROJECT_ID || "gen-lang-client-0223592723";
+  const databaseId = process.env.VITE_FIREBASE_DATABASE_ID || "ai-studio-8d16fa40-122b-4ae3-bc92-82dd487f555c";
+  const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/${collectionName}/${docId}?updateMask.fieldPaths=otpAttempts`;
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      fields: {
+        otpAttempts: { integerValue: String(currentAttempts + 1) }
+      }
+    })
+  });
+  return res.ok;
+}
+async function clearFirestoreOTP(collectionName, docId) {
+  const token = await getServiceAccountAccessToken();
+  const projectId = process.env.VITE_FIREBASE_PROJECT_ID || "gen-lang-client-0223592723";
+  const databaseId = process.env.VITE_FIREBASE_DATABASE_ID || "ai-studio-8d16fa40-122b-4ae3-bc92-82dd487f555c";
+  const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/${collectionName}/${docId}?updateMask.fieldPaths=otpHash&updateMask.fieldPaths=otpExpires&updateMask.fieldPaths=otpAttempts`;
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      fields: {}
+      // An empty fields object deletes the fields specified in updateMask
+    })
+  });
+  return res.ok;
+}
+async function verifyTurnstileToken(token) {
+  const secret = process.env.TURNSTILE_SECRET_KEY;
+  if (!secret || secret === "1x00000000000000000000000000000000") {
+    return true;
+  }
+  try {
+    const res = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        secret,
+        response: token
+      })
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    return !!data.success;
+  } catch (err) {
+    console.error("[Turnstile] Verification failed:", err);
+    return false;
+  }
+}
+async function sendOTPEmail(toEmail, candidateName, otpCode) {
+  const resendApiKey = process.env.RESEND_API_KEY;
+  if (!resendApiKey || resendApiKey.startsWith("re_your_api_key")) {
+    console.warn(`[Resend] API Key is missing or default. Simulated OTP to: ${toEmail} | Code: ${otpCode}`);
+    return true;
+  }
+  try {
+    const url = "https://api.resend.com/emails";
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${resendApiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        from: "Portal DGEP <onboarding@resend.dev>",
+        to: [toEmail],
+        subject: "C\xF3digo de Confirma\xE7\xE3o - Portal de Gerenciamento de Pessoas",
+        html: `
+          <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 8px;">
+            <h2 style="color: #4f46e5; margin-bottom: 20px; text-align: center;">Confirma\xE7\xE3o de Acesso</h2>
+            <p>Ol\xE1, <strong>${candidateName}</strong>.</p>
+            <p>Para prosseguir com a visualiza\xE7\xE3o dos documentos e a assinatura digital, insira o c\xF3digo de confirma\xE7\xE3o abaixo:</p>
+            <div style="background-color: #f8fafc; padding: 15px; text-align: center; border-radius: 6px; margin: 25px 0; border: 1px solid #e2e8f0;">
+              <span style="font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #1e293b;">${otpCode}</span>
+            </div>
+            <p style="font-size: 14px; color: #64748b;">Este c\xF3digo \xE9 v\xE1lido por <strong>10 minutos</strong>. Se voc\xEA n\xE3o solicitou este acesso, por favor ignore este e-mail.</p>
+            <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 30px 0;" />
+            <p style="font-size: 11px; color: #94a3b8; text-align: center; line-height: 1.5;">
+              DGEP - Diretoria de Gest\xE3o de Pessoas<br/>C\xE2mara Municipal de Curitiba
+            </p>
+          </div>
+        `
+      })
+    });
+    if (!response.ok) {
+      console.error("[Resend] Failed to send email:", await response.text());
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error("[Resend] Email dispatch exception:", err);
+    return false;
+  }
+}
 async function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith("Bearer ")) {
@@ -619,18 +796,26 @@ async function authMiddleware(req, res, next) {
       req.user = user;
       return next();
     }
+    const tempPayload = verifyTempJWT(token);
+    if (tempPayload) {
+      req.user = { email: tempPayload.email, isExternal: true, requestId: tempPayload.requestId };
+      return next();
+    }
   }
-  const body = req.body || {};
-  const query = req.query || {};
-  const context = body.context || {};
-  const requestId = body.requestId || context.requestId || query.requestId;
-  const isValidFirestoreId = (id) => typeof id === "string" && /^[a-zA-Z0-9]{20}$/.test(id);
-  const isValidDriveId = (id) => typeof id === "string" && /^[a-zA-Z0-9_-]{28,45}$/.test(id);
-  const fileIdOrUrl = body.fileIdOrUrl || "";
-  const isDriveUrl = typeof fileIdOrUrl === "string" && fileIdOrUrl.includes("/file/d/");
-  const driveIdFromUrl = isDriveUrl ? fileIdOrUrl.match(/\/file\/d\/([a-zA-Z0-9_-]+)/)?.[1] : null;
-  if (isValidFirestoreId(requestId) || isValidDriveId(query.fileId) || isValidDriveId(fileIdOrUrl) || isValidDriveId(driveIdFromUrl)) {
-    return next();
+  const isResendConfigured = process.env.RESEND_API_KEY && !process.env.RESEND_API_KEY.startsWith("re_your_api_key");
+  if (!isResendConfigured) {
+    const body = req.body || {};
+    const query = req.query || {};
+    const context = body.context || {};
+    const requestId = body.requestId || context.requestId || query.requestId;
+    const isValidFirestoreId = (id) => typeof id === "string" && /^[a-zA-Z0-9]{20}$/.test(id);
+    const isValidDriveId = (id) => typeof id === "string" && /^[a-zA-Z0-9_-]{28,45}$/.test(id);
+    const fileIdOrUrl = body.fileIdOrUrl || "";
+    const isDriveUrl = typeof fileIdOrUrl === "string" && fileIdOrUrl.includes("/file/d/");
+    const driveIdFromUrl = isDriveUrl ? fileIdOrUrl.match(/\/file\/d\/([a-zA-Z0-9_-]+)/)?.[1] : null;
+    if (isValidFirestoreId(requestId) || isValidDriveId(query.fileId) || isValidDriveId(fileIdOrUrl) || isValidDriveId(driveIdFromUrl)) {
+      return next();
+    }
   }
   return res.status(401).send("Acesso n\xE3o autorizado. Autentica\xE7\xE3o obrigat\xF3ria.");
 }
@@ -645,7 +830,7 @@ async function startServer() {
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
     res.setHeader(
       "Content-Security-Policy",
-      "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.googleapis.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://lh3.googleusercontent.com https://*.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://gestao-pessoas.onrender.com wss://*.googleapis.com;"
+      "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://apis.google.com https://challenges.cloudflare.com; frame-src 'self' https://*.firebaseapp.com https://*.googleapis.com https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://lh3.googleusercontent.com https://*.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://gestao-pessoas.onrender.com wss://*.googleapis.com https://challenges.cloudflare.com;"
     );
     next();
   });
@@ -873,6 +1058,159 @@ async function startServer() {
     } catch (error) {
       console.error("API /api/drive/delete error:", error);
       return res.status(500).send(error.message || "Erro interno ao excluir arquivo no Google Drive.");
+    }
+  });
+  app.post("/api/auth/request-otp", async (req, res) => {
+    try {
+      const { requestId, role, turnstileToken } = req.body;
+      if (!requestId || !role) {
+        return res.status(400).send("Faltam par\xE2metros obrigat\xF3rios (requestId, role).");
+      }
+      const isHuman = await verifyTurnstileToken(turnstileToken);
+      if (!isHuman) {
+        return res.status(400).send("Falha na valida\xE7\xE3o do CAPTCHA (Turnstile).");
+      }
+      let colName = "hiring_requests";
+      let docData = await getFirestoreDocument(colName, requestId);
+      if (!docData) {
+        colName = "hiring_requests_comissionados";
+        docData = await getFirestoreDocument(colName, requestId);
+      }
+      if (!docData) {
+        return res.status(404).send("Processo de contrata\xE7\xE3o n\xE3o encontrado.");
+      }
+      const fields = docData.fields || {};
+      let targetEmail = "";
+      let targetName = "";
+      if (role === "student" || role === "candidate") {
+        if (fields.student && fields.student.mapValue && fields.student.mapValue.fields) {
+          const sFields = fields.student.mapValue.fields;
+          targetEmail = sFields.email ? sFields.email.stringValue : "";
+          targetName = sFields.name ? sFields.name.stringValue : "Candidato";
+        } else if (fields.candidate && fields.candidate.mapValue && fields.candidate.mapValue.fields) {
+          const cFields = fields.candidate.mapValue.fields;
+          targetEmail = cFields.email ? cFields.email.stringValue : "";
+          targetName = cFields.name ? cFields.name.stringValue : "Candidato";
+        }
+      } else if (role === "supervisor" || role === "nominator") {
+        if (fields.supervisor && fields.supervisor.mapValue && fields.supervisor.mapValue.fields) {
+          const sFields = fields.supervisor.mapValue.fields;
+          targetEmail = sFields.email ? sFields.email.stringValue : "";
+          targetName = sFields.name ? sFields.name.stringValue : "Supervisor";
+        } else if (fields.nominator && fields.nominator.mapValue && fields.nominator.mapValue.fields) {
+          const nFields = fields.nominator.mapValue.fields;
+          targetEmail = nFields.email ? nFields.email.stringValue : "";
+          targetName = nFields.name ? nFields.name.stringValue : "Supervisor";
+        }
+      }
+      if (!targetEmail) {
+        return res.status(400).send("Nenhum endere\xE7o de e-mail encontrado para o papel selecionado neste processo.");
+      }
+      const otpCode = Math.floor(1e5 + Math.random() * 9e5).toString();
+      const hash = import_crypto.default.createHash("sha256").update(otpCode).digest("hex");
+      const expires = new Date(Date.now() + 10 * 60 * 1e3).toISOString();
+      const updated = await updateFirestoreOTP(colName, requestId, hash, expires);
+      if (!updated) {
+        return res.status(500).send("Falha ao inicializar o c\xF3digo de verifica\xE7\xE3o no banco de dados.");
+      }
+      const emailSent = await sendOTPEmail(targetEmail, targetName, otpCode);
+      if (!emailSent) {
+        return res.status(500).send("Erro ao enviar o e-mail de confirma\xE7\xE3o. Por favor, tente novamente.");
+      }
+      const parts = targetEmail.split("@");
+      const namePart = parts[0];
+      const domainPart = parts[1];
+      const maskedEmail = namePart.substring(0, 2) + "*****" + namePart.substring(Math.max(2, namePart.length - 2)) + "@" + domainPart;
+      return res.json({ success: true, maskedEmail });
+    } catch (error) {
+      console.error("API /api/auth/request-otp error:", error);
+      return res.status(500).send("Erro interno ao solicitar o c\xF3digo de verifica\xE7\xE3o.");
+    }
+  });
+  app.post("/api/auth/verify-otp", async (req, res) => {
+    try {
+      const { requestId, code } = req.body;
+      if (!requestId || !code) {
+        return res.status(400).send("Faltam par\xE2metros obrigat\xF3rios (requestId, code).");
+      }
+      let colName = "hiring_requests";
+      let docData = await getFirestoreDocument(colName, requestId);
+      if (!docData) {
+        colName = "hiring_requests_comissionados";
+        docData = await getFirestoreDocument(colName, requestId);
+      }
+      if (!docData) {
+        return res.status(404).send("Processo de contrata\xE7\xE3o n\xE3o encontrado.");
+      }
+      const fields = docData.fields || {};
+      const otpHash = fields.otpHash ? fields.otpHash.stringValue : "";
+      const otpExpires = fields.otpExpires ? fields.otpExpires.stringValue : "";
+      const otpAttempts = fields.otpAttempts ? parseInt(fields.otpAttempts.integerValue || "0", 10) : 0;
+      if (!otpHash || !otpExpires) {
+        return res.status(400).send("Nenhum c\xF3digo ativo foi solicitado para este processo.");
+      }
+      if (otpAttempts >= 3) {
+        return res.status(429).send("Limite m\xE1ximo de tentativas excedido. Solicite um novo c\xF3digo por e-mail.");
+      }
+      if (/* @__PURE__ */ new Date() > new Date(otpExpires)) {
+        return res.status(400).send("O c\xF3digo de verifica\xE7\xE3o expirou. Solicite um novo c\xF3digo.");
+      }
+      const hash = import_crypto.default.createHash("sha256").update(String(code).trim()).digest("hex");
+      if (hash !== otpHash) {
+        await incrementOTPAttempts(colName, requestId, otpAttempts);
+        return res.status(400).send(`C\xF3digo inv\xE1lido. Tentativa ${otpAttempts + 1} de 3.`);
+      }
+      await clearFirestoreOTP(colName, requestId);
+      let userEmail = "external-signer@cmc.pr.gov.br";
+      if (fields.student && fields.student.mapValue && fields.student.mapValue.fields && fields.student.mapValue.fields.email) {
+        userEmail = fields.student.mapValue.fields.email.stringValue;
+      } else if (fields.candidate && fields.candidate.mapValue && fields.candidate.mapValue.fields && fields.candidate.mapValue.fields.email) {
+        userEmail = fields.candidate.mapValue.fields.email.stringValue;
+      }
+      const tempToken = signTempJWT({ requestId, email: userEmail }, 3600);
+      return res.json({ success: true, token: tempToken });
+    } catch (error) {
+      console.error("API /api/auth/verify-otp error:", error);
+      return res.status(500).send("Erro interno ao validar o c\xF3digo.");
+    }
+  });
+  app.post("/api/auth/send-invite", authMiddleware, async (req, res) => {
+    try {
+      const { to, subject, text, html } = req.body;
+      if (!to || !subject || !text && !html) {
+        return res.status(400).send("Faltam par\xE2metros obrigat\xF3rios (to, subject, text/html).");
+      }
+      if (req.user?.isExternal) {
+        return res.status(403).send("Acesso proibido para usu\xE1rios externos.");
+      }
+      const resendApiKey = process.env.RESEND_API_KEY;
+      if (!resendApiKey || resendApiKey.startsWith("re_your_api_key")) {
+        console.warn(`[Resend] Simulated invite email to: ${to} | Subject: ${subject}`);
+        return res.json({ success: true, simulated: true });
+      }
+      const response = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${resendApiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          from: "Portal DGEP <onboarding@resend.dev>",
+          to: [to],
+          subject,
+          text,
+          html
+        })
+      });
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error("[Resend] Invite failed:", errText);
+        return res.status(500).send(`Falha ao disparar e-mail: ${errText}`);
+      }
+      return res.json({ success: true });
+    } catch (error) {
+      console.error("API /api/auth/send-invite error:", error);
+      return res.status(500).send("Erro interno ao enviar e-mail.");
     }
   });
   if (process.env.NODE_ENV !== "production") {
