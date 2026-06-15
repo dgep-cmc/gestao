@@ -774,13 +774,14 @@ async function sendOTPEmail(toEmail, candidateName, otpCode) {
       })
     });
     if (!response.ok) {
-      console.error("[Resend] Failed to send email:", await response.text());
-      return false;
+      const errText = await response.text();
+      console.error("[Resend] Failed to send email:", errText);
+      throw new Error(`Resend API failed: ${errText}`);
     }
     return true;
   } catch (err) {
     console.error("[Resend] Email dispatch exception:", err);
-    return false;
+    throw err;
   }
 }
 async function authMiddleware(req, res, next) {
