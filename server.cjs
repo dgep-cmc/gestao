@@ -753,7 +753,7 @@ async function sendOTPEmail(toEmail, candidateName, otpCode) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        from: "Portal DGEP <onboarding@resend.dev>",
+        from: process.env.RESEND_FROM_EMAIL || "Portal DGEP <onboarding@resend.dev>",
         to: [toEmail],
         subject: "C\xF3digo de Confirma\xE7\xE3o - Portal de Gerenciamento de Pessoas",
         html: `
@@ -1180,6 +1180,93 @@ async function startServer() {
       turnstileSiteKey: process.env.VITE_TURNSTILE_SITE_KEY || "1x00000000000000000000AA"
     });
   });
+  const attemptMap = /* @__PURE__ */ new Map();
+  app.post("/api/auth/verify-cpf", async (req, res) => {
+    try {
+      const { requestId, role, cpf, turnstileToken } = req.body;
+      if (!requestId || !role || !cpf) {
+        return res.status(400).send("Faltam par\xE2metros obrigat\xF3rios (requestId, role, cpf).");
+      }
+      const trackerKey = `${requestId}:${role}`;
+      const tracker = attemptMap.get(trackerKey) || { attempts: 0, lockoutExpires: 0 };
+      if (tracker.lockoutExpires > Date.now()) {
+        const remaining = Math.ceil((tracker.lockoutExpires - Date.now()) / 1e3);
+        return res.status(403).json({
+          lockedOut: true,
+          timeRemaining: remaining,
+          message: `Muitas tentativas. Acesso bloqueado por mais ${remaining} segundos.`
+        });
+      }
+      const isHuman = await verifyTurnstileToken(turnstileToken);
+      if (!isHuman) {
+        return res.status(400).send("Falha na valida\xE7\xE3o do CAPTCHA (Turnstile).");
+      }
+      let colName = "hiring_requests";
+      let docData = await getFirestoreDocument(colName, requestId);
+      if (!docData) {
+        colName = "hiring_requests_comissionados";
+        docData = await getFirestoreDocument(colName, requestId);
+      }
+      if (!docData) {
+        return res.status(404).send("Processo de contrata\xE7\xE3o n\xE3o encontrado.");
+      }
+      const fields = docData.fields || {};
+      let dbCpf = "";
+      let userEmail = "external-signer@cmc.pr.gov.br";
+      if (role === "student" || role === "candidate") {
+        if (fields.student && fields.student.mapValue && fields.student.mapValue.fields) {
+          const sFields = fields.student.mapValue.fields;
+          dbCpf = sFields.cpf ? sFields.cpf.stringValue : "";
+          userEmail = sFields.email ? sFields.email.stringValue : userEmail;
+        } else if (fields.candidate && fields.candidate.mapValue && fields.candidate.mapValue.fields) {
+          const cFields = fields.candidate.mapValue.fields;
+          dbCpf = cFields.cpf ? cFields.cpf.stringValue : "";
+          userEmail = cFields.email ? cFields.email.stringValue : userEmail;
+        }
+      } else if (role === "supervisor" || role === "nominator") {
+        if (fields.supervisor && fields.supervisor.mapValue && fields.supervisor.mapValue.fields) {
+          const sFields = fields.supervisor.mapValue.fields;
+          dbCpf = sFields.cpf ? sFields.cpf.stringValue : "";
+          userEmail = sFields.email ? sFields.email.stringValue : userEmail;
+        } else if (fields.nominator && fields.nominator.mapValue && fields.nominator.mapValue.fields) {
+          const nFields = fields.nominator.mapValue.fields;
+          dbCpf = nFields.cpf ? nFields.cpf.stringValue : "";
+          userEmail = nFields.email ? nFields.email.stringValue : userEmail;
+        }
+      }
+      if (!dbCpf) {
+        return res.status(400).send("CPF n\xE3o cadastrado para esta fun\xE7\xE3o neste processo.");
+      }
+      const normInputCpf = cpf.replace(/\D/g, "");
+      const normDbCpf = dbCpf.replace(/\D/g, "");
+      if (normInputCpf === normDbCpf) {
+        attemptMap.delete(trackerKey);
+        const tempToken = signTempJWT({ requestId, email: userEmail }, 3600);
+        return res.json({ success: true, token: tempToken });
+      } else {
+        tracker.attempts += 1;
+        if (tracker.attempts >= 3) {
+          tracker.lockoutExpires = Date.now() + 60 * 1e3;
+          attemptMap.set(trackerKey, tracker);
+          return res.status(403).json({
+            lockedOut: true,
+            timeRemaining: 60,
+            message: "Voc\xEA errou o CPF 3 vezes. Acesso bloqueado por 1 minuto."
+          });
+        } else {
+          attemptMap.set(trackerKey, tracker);
+          return res.status(400).json({
+            success: false,
+            attemptsRemaining: 3 - tracker.attempts,
+            message: `CPF incorreto. Restam ${3 - tracker.attempts} tentativas.`
+          });
+        }
+      }
+    } catch (error) {
+      console.error("API /api/auth/verify-cpf error:", error);
+      return res.status(500).send(`Erro interno ao validar o CPF: ${error.message}`);
+    }
+  });
   app.post("/api/auth/send-invite", authMiddleware, async (req, res) => {
     try {
       const { to, subject, text, html } = req.body;
@@ -1201,7 +1288,7 @@ async function startServer() {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          from: "Portal DGEP <onboarding@resend.dev>",
+          from: process.env.RESEND_FROM_EMAIL || "Portal DGEP <onboarding@resend.dev>",
           to: [to],
           subject,
           text,
