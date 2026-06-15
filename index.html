@@ -3,8 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://lh3.googleusercontent.com https://*.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com;" />
     <title>Portal de Gerenciamento de Frequências e Contratações</title>
-    <script type="module" crossorigin src="./assets/index-CljYfW_n.js"></script>
+    <script type="module" crossorigin src="./assets/index-DZ19t0pj.js"></script>
     <link rel="stylesheet" crossorigin href="./assets/index-CWTMHxow.css">
   </head>
   <body>
@@ -23,12 +24,24 @@
         }
         document.getElementById('root').style.display = 'none';
         document.getElementById('global-error').style.display = 'block';
-        document.getElementById('global-error-details').innerText = 'Mensagem: ' + msg + '\n' + (event.error && event.error.stack ? event.error.stack : '');
+        
+        var isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        if (isLocal) {
+          document.getElementById('global-error-details').innerText = 'Mensagem: ' + msg + '\n' + (event.error && event.error.stack ? event.error.stack : '');
+        } else {
+          document.getElementById('global-error-details').innerText = 'Mensagem: Ocorreu um erro crítico ao inicializar a aplicação. Se o problema persistir, por favor contate a DGEP.';
+        }
       }, true);
       window.addEventListener('unhandledrejection', function(event) {
         document.getElementById('root').style.display = 'none';
         document.getElementById('global-error').style.display = 'block';
-        document.getElementById('global-error-details').innerText = 'Uncaught Promise Rejection: ' + (event.reason ? (event.reason.stack || event.reason) : 'Unknown reason');
+        
+        var isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        if (isLocal) {
+          document.getElementById('global-error-details').innerText = 'Uncaught Promise Rejection: ' + (event.reason ? (event.reason.stack || event.reason) : 'Unknown reason');
+        } else {
+          document.getElementById('global-error-details').innerText = 'Mensagem: Ocorreu um erro crítico inesperado. Se o problema persistir, por favor contate a DGEP.';
+        }
       });
     </script>
   </body>
