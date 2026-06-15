@@ -365,17 +365,21 @@ async function resolveTargetFolder(token, context, fileName) {
       const hiringId = await getOrCreateFolder(token, "Contrata\xE7\xF5es", estagiariosId);
       const lotacao = context.lotacao || "N\xE3o Categorizado";
       const lotacaoId = await getOrCreateFolder(token, lotacao, hiringId);
-      let estagiarioName = "N\xE3o Categorizado";
-      if (context.requestNameAndId) {
-        const parts = context.requestNameAndId.split("_");
-        if (parts.length > 1) {
-          parts.pop();
-          estagiarioName = parts.join(" ");
-        } else {
-          estagiarioName = context.requestNameAndId;
+      let folderName = "N\xE3o Categorizado";
+      if (context.requestType === "opening") {
+        folderName = "Abertura de Vagas";
+      } else {
+        if (context.requestNameAndId) {
+          const parts = context.requestNameAndId.split("_");
+          if (parts.length > 1) {
+            parts.pop();
+            folderName = parts.join(" ");
+          } else {
+            folderName = context.requestNameAndId;
+          }
         }
       }
-      return await getOrCreateFolder(token, estagiarioName, lotacaoId);
+      return await getOrCreateFolder(token, folderName, lotacaoId);
     }
   }
 }
@@ -492,6 +496,33 @@ async function deleteFile(fileIdOrUrl) {
     return false;
   }
 }
+async function getUniqueFileName(token, folderId, baseName) {
+  const extIndex = baseName.lastIndexOf(".");
+  const name = extIndex !== -1 ? baseName.substring(0, extIndex) : baseName;
+  const ext = extIndex !== -1 ? baseName.substring(extIndex) : "";
+  let uniqueName = baseName;
+  let counter = 1;
+  try {
+    const query = `'${folderId}' in parents and trashed = false`;
+    const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(name)&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      return baseName;
+    }
+    const data = await res.json();
+    const existingNames = new Set((data.files || []).map((f) => f.name.toLowerCase()));
+    while (existingNames.has(uniqueName.toLowerCase())) {
+      uniqueName = `${name}_${counter}${ext}`;
+      counter++;
+    }
+    return uniqueName;
+  } catch (err) {
+    console.error("Error finding unique file name on Drive:", err);
+    return baseName;
+  }
+}
 async function startServer() {
   const app = (0, import_express.default)();
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3e3;
@@ -515,7 +546,11 @@ async function startServer() {
       const fileBuffer = Buffer.from(fileBase64, "base64");
       const token = await getServiceAccountAccessToken();
       const folderId = await resolveTargetFolder(token, context, fileName);
-      const result = await uploadFile(token, fileBuffer, fileName, fileType, folderId);
+      let resolvedFileName = fileName;
+      if (context.requestType === "opening") {
+        resolvedFileName = await getUniqueFileName(token, folderId, fileName);
+      }
+      const result = await uploadFile(token, fileBuffer, resolvedFileName, fileType, folderId);
       return res.json(result);
     } catch (error) {
       console.error("API /api/drive/upload error:", error);
