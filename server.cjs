@@ -1174,6 +1174,11 @@ async function startServer() {
       return res.status(500).send("Erro interno ao validar o c\xF3digo.");
     }
   });
+  app.get("/api/config", (req, res) => {
+    return res.json({
+      turnstileSiteKey: process.env.VITE_TURNSTILE_SITE_KEY || "1x00000000000000000000AA"
+    });
+  });
   app.post("/api/auth/send-invite", authMiddleware, async (req, res) => {
     try {
       const { to, subject, text, html } = req.body;
