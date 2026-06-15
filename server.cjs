@@ -552,7 +552,17 @@ async function startServer() {
   const app = (0, import_express.default)();
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3e3;
   const httpServer = import_http.default.createServer(app);
-  app.use(import_express.default.json({ limit: "50mb" }));
+  app.use(import_express.default.json({ limit: "10mb" }));
+  app.use((req, res, next) => {
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader(
+      "Content-Security-Policy",
+      "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://lh3.googleusercontent.com https://*.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com;"
+    );
+    next();
+  });
   app.use("/api/", rateLimiter);
   const allowedOrigins = [
     "https://gestao-pessoas.onrender.com",
@@ -584,6 +594,12 @@ async function startServer() {
       const { fileBase64, fileName, fileType, context } = req.body;
       if (!fileBase64 || !fileName || !context) {
         return res.status(400).send("Faltam par\xE2metros obrigat\xF3rios para o upload (fileBase64, fileName ou context).");
+      }
+      const allowedExtensions = [".pdf", ".png", ".jpg", ".jpeg"];
+      const allowedMimeTypes = ["application/pdf", "image/png", "image/jpeg"];
+      const fileExt = import_path.default.extname(fileName).toLowerCase();
+      if (!allowedExtensions.includes(fileExt) || !allowedMimeTypes.includes(fileType)) {
+        return res.status(400).send("Tipo de arquivo n\xE3o permitido. Apenas PDFs e imagens (PNG, JPG, JPEG) s\xE3o aceitos.");
       }
       const fileBuffer = Buffer.from(fileBase64, "base64");
       const token = await getServiceAccountAccessToken();
@@ -753,6 +769,10 @@ async function startServer() {
       const { fileIdOrUrl, fileBase64, fileType } = req.body;
       if (!fileIdOrUrl || !fileBase64) {
         return res.status(400).send("Faltam par\xE2metros obrigat\xF3rios para a atualiza\xE7\xE3o.");
+      }
+      const allowedMimeTypes = ["application/pdf", "image/png", "image/jpeg"];
+      if (fileType && !allowedMimeTypes.includes(fileType)) {
+        return res.status(400).send("Tipo de arquivo n\xE3o permitido.");
       }
       const fileBuffer = Buffer.from(fileBase64, "base64");
       const success = await updateFileContent(fileIdOrUrl, fileBuffer, fileType);
