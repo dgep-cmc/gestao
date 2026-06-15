@@ -1124,7 +1124,7 @@ async function startServer() {
       return res.json({ success: true, maskedEmail });
     } catch (error) {
       console.error("API /api/auth/request-otp error:", error);
-      return res.status(500).send("Erro interno ao solicitar o c\xF3digo de verifica\xE7\xE3o.");
+      return res.status(500).send(`Erro interno ao solicitar o c\xF3digo de verifica\xE7\xE3o: ${error.message}`);
     }
   });
   app.post("/api/auth/verify-otp", async (req, res) => {
@@ -1171,7 +1171,7 @@ async function startServer() {
       return res.json({ success: true, token: tempToken });
     } catch (error) {
       console.error("API /api/auth/verify-otp error:", error);
-      return res.status(500).send("Erro interno ao validar o c\xF3digo.");
+      return res.status(500).send(`Erro interno ao validar o c\xF3digo: ${error.message}`);
     }
   });
   app.get("/api/config", (req, res) => {
