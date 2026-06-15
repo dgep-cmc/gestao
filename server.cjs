@@ -152,7 +152,7 @@ async function getServiceAccountAccessToken() {
   const now = Math.floor(Date.now() / 1e3);
   const payload = {
     iss: email,
-    scope: "https://www.googleapis.com/auth/drive",
+    scope: "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/datastore https://www.googleapis.com/auth/cloud-platform",
     aud: "https://oauth2.googleapis.com/token",
     exp: now + 3600,
     iat: now
