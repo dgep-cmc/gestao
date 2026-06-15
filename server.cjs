@@ -566,7 +566,7 @@ async function fetchGooglePublicKeys() {
   }
   return googlePublicKeys;
 }
-async function verifyFirebaseToken(token) {
+async function verifyFirebaseToken(token, allowExternal = false) {
   try {
     const parts = token.split(".");
     if (parts.length !== 3) {
@@ -582,9 +582,11 @@ async function verifyFirebaseToken(token) {
       return null;
     }
     const email = payload.email;
-    if (!email || !email.endsWith("@cmc.pr.gov.br")) {
-      console.warn("[Auth] Invalid email domain:", email);
-      return null;
+    if (!allowExternal) {
+      if (!email || !email.endsWith("@cmc.pr.gov.br")) {
+        console.warn("[Auth] Invalid email domain:", email);
+        return null;
+      }
     }
     const keys = await fetchGooglePublicKeys();
     const cert = keys[header.kid];
@@ -1265,6 +1267,60 @@ async function startServer() {
     } catch (error) {
       console.error("API /api/auth/verify-cpf error:", error);
       return res.status(500).send(`Erro interno ao validar o CPF: ${error.message}`);
+    }
+  });
+  app.post("/api/auth/verify-google-auth", async (req, res) => {
+    try {
+      const { requestId, role, firebaseIdToken } = req.body;
+      if (!requestId || !role || !firebaseIdToken) {
+        return res.status(400).send("Faltam par\xE2metros obrigat\xF3rios (requestId, role, firebaseIdToken).");
+      }
+      const user = await verifyFirebaseToken(firebaseIdToken, true);
+      if (!user || !user.email) {
+        return res.status(400).send("Autentica\xE7\xE3o do Google inv\xE1lida ou expirada.");
+      }
+      const googleEmail = user.email.toLowerCase().trim();
+      let colName = "hiring_requests";
+      let docData = await getFirestoreDocument(colName, requestId);
+      if (!docData) {
+        colName = "hiring_requests_comissionados";
+        docData = await getFirestoreDocument(colName, requestId);
+      }
+      if (!docData) {
+        return res.status(404).send("Processo de contrata\xE7\xE3o n\xE3o encontrado.");
+      }
+      const fields = docData.fields || {};
+      let dbEmail = "";
+      if (role === "student" || role === "candidate") {
+        if (fields.student && fields.student.mapValue && fields.student.mapValue.fields) {
+          const sFields = fields.student.mapValue.fields;
+          dbEmail = sFields.email ? sFields.email.stringValue : "";
+        } else if (fields.candidate && fields.candidate.mapValue && fields.candidate.mapValue.fields) {
+          const cFields = fields.candidate.mapValue.fields;
+          dbEmail = cFields.email ? cFields.email.stringValue : "";
+        }
+      } else if (role === "supervisor" || role === "nominator") {
+        if (fields.supervisor && fields.supervisor.mapValue && fields.supervisor.mapValue.fields) {
+          const sFields = fields.supervisor.mapValue.fields;
+          dbEmail = sFields.email ? sFields.email.stringValue : "";
+        } else if (fields.nominator && fields.nominator.mapValue && fields.nominator.mapValue.fields) {
+          const nFields = fields.nominator.mapValue.fields;
+          dbEmail = nFields.email ? nFields.email.stringValue : "";
+        }
+      }
+      if (!dbEmail) {
+        return res.status(400).send("Nenhum e-mail cadastrado para esta fun\xE7\xE3o neste processo.");
+      }
+      const normDbEmail = dbEmail.toLowerCase().trim();
+      if (googleEmail === normDbEmail) {
+        const tempToken = signTempJWT({ requestId, email: googleEmail }, 3600);
+        return res.json({ success: true, token: tempToken });
+      } else {
+        return res.status(400).send(`O e-mail da sua conta Google (${googleEmail}) n\xE3o corresponde ao e-mail cadastrado para este processo.`);
+      }
+    } catch (error) {
+      console.error("API /api/auth/verify-google-auth error:", error);
+      return res.status(500).send(`Erro interno ao validar a autentica\xE7\xE3o do Google: ${error.message}`);
     }
   });
   app.post("/api/auth/send-invite", authMiddleware, async (req, res) => {
