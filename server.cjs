@@ -548,6 +548,79 @@ function rateLimiter(req, res, next) {
   }
   next();
 }
+var googlePublicKeys = {};
+var nextKeysFetchTime = 0;
+async function fetchGooglePublicKeys() {
+  const now = Date.now();
+  if (now < nextKeysFetchTime && Object.keys(googlePublicKeys).length > 0) {
+    return googlePublicKeys;
+  }
+  try {
+    const res = await fetch("https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com");
+    if (res.ok) {
+      googlePublicKeys = await res.json();
+      nextKeysFetchTime = now + 3600 * 1e3;
+    }
+  } catch (err) {
+    console.error("Error fetching Google public keys:", err);
+  }
+  return googlePublicKeys;
+}
+async function verifyFirebaseToken(token) {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const [headerB64, payloadB64, signatureB64] = parts;
+    const header = JSON.parse(Buffer.from(headerB64, "base64").toString("utf8"));
+    const payload = JSON.parse(Buffer.from(payloadB64, "base64").toString("utf8"));
+    const now = Math.floor(Date.now() / 1e3);
+    if (payload.exp < now) {
+      console.warn("Token expired");
+      return null;
+    }
+    const email = payload.email;
+    if (!email || !email.endsWith("@cmc.pr.gov.br")) {
+      console.warn("Invalid email domain:", email);
+      return null;
+    }
+    const keys = await fetchGooglePublicKeys();
+    const cert = keys[header.kid];
+    if (!cert) {
+      console.warn("Public key certificate not found for kid:", header.kid);
+      return null;
+    }
+    const verify = import_crypto.default.createVerify("RSA-SHA256");
+    verify.update(`${headerB64}.${payloadB64}`);
+    const base64Signature = signatureB64.replace(/-/g, "+").replace(/_/g, "/");
+    const signatureBuf = Buffer.from(base64Signature, "base64");
+    const isValid = verify.verify(cert, signatureBuf);
+    if (!isValid) {
+      console.warn("JWT signature verification failed");
+      return null;
+    }
+    return { email };
+  } catch (err) {
+    console.error("Error verifying token:", err);
+    return null;
+  }
+}
+async function authMiddleware(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).send("Acesso n\xE3o autorizado. Token ausente.");
+  }
+  const token = authHeader.substring(7);
+  if (process.env.NODE_ENV !== "production" && token === "local-test-token") {
+    req.user = { email: "diego.martins@cmc.pr.gov.br" };
+    return next();
+  }
+  const user = await verifyFirebaseToken(token);
+  if (!user) {
+    return res.status(401).send("Acesso n\xE3o autorizado. Token inv\xE1lido.");
+  }
+  req.user = user;
+  next();
+}
 async function startServer() {
   const app = (0, import_express.default)();
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3e3;
@@ -589,7 +662,7 @@ async function startServer() {
       localTime: (/* @__PURE__ */ new Date()).toLocaleTimeString("en-US", { timeZone: "America/Sao_Paulo" })
     });
   });
-  app.post("/api/drive/upload", async (req, res) => {
+  app.post("/api/drive/upload", authMiddleware, async (req, res) => {
     try {
       const { fileBase64, fileName, fileType, context } = req.body;
       if (!fileBase64 || !fileName || !context) {
@@ -615,7 +688,7 @@ async function startServer() {
       return res.status(500).send(error.message || "Erro interno ao realizar upload para o Google Drive.");
     }
   });
-  app.get("/api/drive/download", async (req, res) => {
+  app.get("/api/drive/download", authMiddleware, async (req, res) => {
     try {
       const fileId = req.query.fileId;
       if (!fileId) {
@@ -642,7 +715,7 @@ async function startServer() {
       return res.status(500).send(error.message || "Erro interno ao baixar arquivo do Google Drive.");
     }
   });
-  app.get("/api/drive/diagnostics", (req, res, next) => {
+  app.get("/api/drive/diagnostics", authMiddleware, (req, res, next) => {
     const isLocal = req.hostname === "localhost" || req.hostname === "127.0.0.1";
     if (process.env.NODE_ENV === "production" && !isLocal) {
       return res.status(403).send("Acesso restrito ao ambiente de desenvolvimento.");
@@ -764,7 +837,7 @@ async function startServer() {
       return res.status(500).send(error.message || "Erro interno ao rodar diagn\xF3sticos.");
     }
   });
-  app.post("/api/drive/update", async (req, res) => {
+  app.post("/api/drive/update", authMiddleware, async (req, res) => {
     try {
       const { fileIdOrUrl, fileBase64, fileType } = req.body;
       if (!fileIdOrUrl || !fileBase64) {
@@ -782,7 +855,7 @@ async function startServer() {
       return res.status(500).send(error.message || "Erro interno ao atualizar arquivo no Google Drive.");
     }
   });
-  app.post("/api/drive/delete", async (req, res) => {
+  app.post("/api/drive/delete", authMiddleware, async (req, res) => {
     try {
       const { fileIdOrUrl } = req.body;
       if (!fileIdOrUrl) {
