@@ -728,13 +728,7 @@ async function startServer() {
       return res.status(500).send(error.message || "Erro interno ao baixar arquivo do Google Drive.");
     }
   });
-  app.get("/api/drive/diagnostics", authMiddleware, (req, res, next) => {
-    const isLocal = req.hostname === "localhost" || req.hostname === "127.0.0.1";
-    if (process.env.NODE_ENV === "production" && !isLocal) {
-      return res.status(403).send("Acesso restrito ao ambiente de desenvolvimento.");
-    }
-    next();
-  }, async (req, res) => {
+  app.get("/api/drive/diagnostics", authMiddleware, async (req, res) => {
     try {
       const privateKey = process.env.VITE_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || "";
       const email = process.env.VITE_GOOGLE_SERVICE_ACCOUNT_EMAIL || "";
