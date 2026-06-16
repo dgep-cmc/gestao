@@ -794,7 +794,8 @@ async function authMiddleware(req, res, next) {
       req.user = { email: "diego.martins@cmc.pr.gov.br" };
       return next();
     }
-    const user = await verifyFirebaseToken(token);
+    const isDriveRoute = req.path.startsWith("/api/drive/");
+    const user = await verifyFirebaseToken(token, isDriveRoute);
     if (user) {
       req.user = user;
       return next();
